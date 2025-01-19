@@ -3,3 +3,5 @@ local_openllama_model/
 local_llama_model/
 pdfs/
 *.json
+open_llama_7b_v2/
+models/

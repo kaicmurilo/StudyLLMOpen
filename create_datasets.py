@@ -6,7 +6,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # Configuração do modelo local
 LOCAL_MODEL_DIR = (
-    "./local_openllama_model"  # Caminho onde o modelo está armazenado localmente
+    "./open_llama_7b_v2"  # Caminho onde o modelo está armazenado localmente
 )
 CHUNK_SIZE = 500  # Limite de tokens por chunk
 
@@ -49,19 +49,19 @@ def generate_questions_answers_from_text(chunks):
     for context in chunks:
         # Gerar pergunta com base no contexto
         prompt_question = f"""
-Below is a context from a document. Write a question based on the context and provide a concise answer.
+            Abaixo está um contexto de um documento. Escreva uma pergunta com base no contexto e forneça uma resposta concisa.
 
-### Context:
-{context}
+            ### Contexto:
+            {context}
 
-### Question:
-"""
+            ### Pergunta:
+            """
         inputs = tokenizer(prompt_question, return_tensors="pt")
         outputs = model.generate(**inputs, max_new_tokens=50)
         question = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
         # Gerar resposta com base na pergunta
-        prompt_answer = prompt_question + question + "\n\n### Answer:"
+        prompt_answer = prompt_question + question + "\n\n### Resposta:"
         inputs = tokenizer(prompt_answer, return_tensors="pt")
         outputs = model.generate(**inputs, max_new_tokens=50)
         answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
