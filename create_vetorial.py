@@ -1,5 +1,5 @@
 import os
-import pickle  # Para salvar o mapeamento `id_to_sentence`
+import pickle
 
 import faiss
 import numpy as np
@@ -32,88 +32,84 @@ def generate_embeddings(sentences, model_name="all-MiniLM-L6-v2"):
     return embeddings
 
 
-# Passo 4: Criar um banco vetorial com FAISS
-def create_faiss_index(embeddings, sentences):
-    dimension = embeddings.shape[1]  # Tamanho do vetor
-    index = faiss.IndexFlatL2(
-        dimension
-    )  # Cria índice FAISS baseado em L2 (distância euclidiana)
+# Passo 4: Criar ou atualizar banco vetorial com FAISS
+def create_or_update_faiss_index(index, embeddings, sentences, id_to_sentence):
+    if index is None:  # Criar novo índice
+        dimension = embeddings.shape[1]
+        index = faiss.IndexFlatL2(dimension)
     index.add(embeddings)  # Adiciona os vetores ao índice
 
-    # Salvar as sentenças em paralelo
-    id_to_sentence = {i: sentence for i, sentence in enumerate(sentences)}
+    # Atualizar o mapeamento de sentenças
+    current_offset = len(id_to_sentence)
+    for i, sentence in enumerate(sentences):
+        id_to_sentence[current_offset + i] = sentence
+
     return index, id_to_sentence
 
 
 # Passo 5: Salvar banco vetorial e mapeamento
 def save_faiss_index(index, id_to_sentence, index_path, mapping_path):
-    # Verifica se o diretório existe; caso contrário, cria-o
     os.makedirs(os.path.dirname(index_path), exist_ok=True)
-
-    # Salva o índice FAISS
     faiss.write_index(index, index_path)
-
-    # Salva o mapeamento como um arquivo pickle
     with open(mapping_path, "wb") as f:
         pickle.dump(id_to_sentence, f)
 
 
 # Passo 6: Carregar banco vetorial e mapeamento
 def load_faiss_index(index_path, mapping_path):
-    index = faiss.read_index(index_path)  # Carrega o índice FAISS
+    index = faiss.read_index(index_path)
     with open(mapping_path, "rb") as f:
-        id_to_sentence = pickle.load(f)  # Carrega o mapeamento
+        id_to_sentence = pickle.load(f)
     return index, id_to_sentence
 
 
-# Passo 7: Buscar no banco vetorial
-def search_faiss(index, id_to_sentence, query, model):
-    query_embedding = model.encode([query], convert_to_numpy=True)
-    distances, indices = index.search(
-        query_embedding, k=5
-    )  # Retorna os 5 mais próximos
+# Processar todos os PDFs de um diretório
+def process_pdfs(
+    pdf_dir, trained_dir, index_path, mapping_path, model_name="all-MiniLM-L6-v2"
+):
+    # Carregar banco vetorial existente ou inicializar novo
+    if os.path.exists(index_path) and os.path.exists(mapping_path):
+        print("Carregando banco vetorial existente...")
+        index, id_to_sentence = load_faiss_index(index_path, mapping_path)
+    else:
+        print("Criando novo banco vetorial...")
+        index, id_to_sentence = None, {}
 
-    # Filtrar apenas os índices válidos
-    valid_results = [
-        (id_to_sentence[idx], distances[0][i])
-        for i, idx in enumerate(indices[0])
-        if idx != -1 and idx in id_to_sentence
-    ]
-    return valid_results
+    # Processar PDFs
+    for pdf_file in os.listdir(pdf_dir):
+        pdf_path = os.path.join(pdf_dir, pdf_file)
+        if pdf_file.endswith(".pdf"):
+            print(f"Processando {pdf_file}...")
+
+            # Extrair texto e gerar embeddings
+            text = extract_text_from_pdf(pdf_path)
+            sentences = split_into_sentences(text)
+            embeddings = generate_embeddings(sentences, model_name)
+
+            # Atualizar o banco vetorial
+            index, id_to_sentence = create_or_update_faiss_index(
+                index, embeddings, sentences, id_to_sentence
+            )
+
+            # Mover arquivo para a pasta de treinados
+            os.makedirs(trained_dir, exist_ok=True)
+            os.rename(pdf_path, os.path.join(trained_dir, pdf_file))
+
+    # Salvar banco vetorial atualizado
+    save_faiss_index(index, id_to_sentence, index_path, mapping_path)
+    print("Banco vetorial atualizado e salvo.")
+    return index, id_to_sentence
 
 
 # Exemplo de execução
 if __name__ == "__main__":
-    # Caminho para o PDF
-    pdf_path = "pdfs/_AGRICULTURA-283 - BOLETIM SEMANAL CASA RURAL - AGRICULTURA - CIRCULAR 283.pdf"
+    # Diretórios de entrada e saída
+    pdf_dir = "pdfs/no_train/"
+    trained_dir = "pdfs/trained/"
 
-    # Caminhos para salvar o índice e o mapeamento
+    # Caminhos para o banco vetorial
     index_path = "map_local/faiss_index.bin"
     mapping_path = "map_local/id_to_sentence.pkl"
 
-    # Verifica se o banco vetorial já existe
-    if not (os.path.exists(index_path) and os.path.exists(mapping_path)):
-        print("Criando novo banco vetorial...")
-
-        # Extração e processamento
-        text = extract_text_from_pdf(pdf_path)
-        sentences = split_into_sentences(text)
-        embeddings = generate_embeddings(sentences, model_name="all-MiniLM-L6-v2")
-
-        # Criar e salvar banco vetorial
-        index, id_to_sentence = create_faiss_index(embeddings, sentences)
-        save_faiss_index(index, id_to_sentence, index_path, mapping_path)
-        print("Banco vetorial criado e salvo.")
-    else:
-        print("Carregando banco vetorial existente...")
-        index, id_to_sentence = load_faiss_index(index_path, mapping_path)
-
-    # Consultar o banco
-    print("Buscando no banco vetorial...")
-    query = "Digite sua consulta aqui"
-    model = SentenceTransformer("all-MiniLM-L6-v2")
-    results = search_faiss(index, id_to_sentence, query, model)
-
-    # Exibir resultados
-    for sentence, distance in results:
-        print(f"Frase: {sentence} (Distância: {distance:.4f})")
+    # Processar PDFs e atualizar o banco vetorial
+    index, id_to_sentence = process_pdfs(pdf_dir, trained_dir, index_path, mapping_path)
