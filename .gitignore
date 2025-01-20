@@ -5,3 +5,4 @@ pdfs/
 *.json
 open_llama_7b_v2/
 models/
+map_local/

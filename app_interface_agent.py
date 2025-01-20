@@ -1,10 +1,17 @@
 import os
+import pickle
 
+import faiss
 import gradio as gr
+from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
+# Caminhos do banco vetorial
+index_path = "map_local/faiss_index.bin"
+mapping_path = "map_local/id_to_sentence.pkl"
+
 # Nome do modelo e diretório local
-model_name = "meta-llama/Llama-3.2-1B-Instruct"  # Substitua pelo modelo desejado
+model_name = "meta-llama/Llama-3.2-1B-Instruct"
 local_path = "./models/Llama-3.2-1B-Instruct"
 
 # Verifica se o modelo já foi baixado
@@ -29,21 +36,55 @@ model = AutoModelForCausalLM.from_pretrained(local_path, device_map="auto")
 generator = pipeline("text-generation", model=model, tokenizer=tokenizer)
 
 # Prompt fixo
-fixed_prompt = "Você é um assistente amigável que responde perguntas de maneira educada e informativa. Não criar conversas, apenas responder a pergunta. Não retornar o histórico da conversa."
+fixed_prompt = "Você é um assistente amigável que responde perguntas de maneira educada e informativa. Use o contexto relevante abaixo para formular sua resposta de forma concisa."
 
 
-# Função para gerar respostas
+# Funções para trabalhar com o banco vetorial
+def load_faiss_index(index_path, mapping_path):
+    index = faiss.read_index(index_path)
+    with open(mapping_path, "rb") as f:
+        id_to_sentence = pickle.load(f)
+    return index, id_to_sentence
+
+
+def search_faiss(index, id_to_sentence, query, model):
+    query_embedding = model.encode([query], convert_to_numpy=True)
+    distances, indices = index.search(query_embedding, k=5)
+    valid_results = [
+        id_to_sentence[idx] for idx in indices[0] if idx != -1 and idx in id_to_sentence
+    ]
+    return "\n".join(valid_results)
+
+
+# Carrega o banco vetorial
+if os.path.exists(index_path) and os.path.exists(mapping_path):
+    print("Carregando banco vetorial...")
+    index, id_to_sentence = load_faiss_index(index_path, mapping_path)
+    embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+else:
+    raise RuntimeError(
+        "Banco vetorial não encontrado. Certifique-se de criá-lo antes de usar este script."
+    )
+
+
+# Função para gerar respostas com base no contexto
 def respond(message, history):
-    prompt = f"{fixed_prompt}\n\nPergunta: {message}\n\nResposta:"
-    response = generator(prompt, max_length=150, num_return_sequences=1)
+    # Busca contexto relevante no banco vetorial
+    context = search_faiss(index, id_to_sentence, message, embedding_model)
+
+    # Gera a resposta do modelo usando o contexto
+    prompt = (
+        f"{fixed_prompt}\n\nContexto:\n{context}\n\nPergunta: {message}\n\nResposta:"
+    )
+    response = generator(prompt, max_new_tokens=150, num_return_sequences=1)
     return response[0]["generated_text"].split("Resposta:")[1].strip()
 
 
 # Interface Gradio com ChatInterface
 demo = gr.ChatInterface(
     respond,
-    title="Chat com LLaMA",
-    description="Um assistente amigável que responde perguntas com informações úteis e claras.",
+    title="Chat com LLaMA usando Base Vetorial",
+    description="Um assistente amigável que usa um banco vetorial para fornecer respostas com base em contexto relevante.",
 )
 
 # Inicia o servidor Gradio
