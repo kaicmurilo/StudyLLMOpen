@@ -80,20 +80,27 @@ def process_pdfs(
         pdf_path = os.path.join(pdf_dir, pdf_file)
         if pdf_file.endswith(".pdf"):
             print(f"Processando {pdf_file}...")
+            try:
+                # Extrair texto e gerar embeddings
+                text = extract_text_from_pdf(pdf_path)
+                sentences = split_into_sentences(text)
+                embeddings = generate_embeddings(sentences, model_name)
 
-            # Extrair texto e gerar embeddings
-            text = extract_text_from_pdf(pdf_path)
-            sentences = split_into_sentences(text)
-            embeddings = generate_embeddings(sentences, model_name)
+                # Atualizar o banco vetorial
+                index, id_to_sentence = create_or_update_faiss_index(
+                    index, embeddings, sentences, id_to_sentence
+                )
 
-            # Atualizar o banco vetorial
-            index, id_to_sentence = create_or_update_faiss_index(
-                index, embeddings, sentences, id_to_sentence
-            )
+                # Salvar banco vetorial atualizado
+                save_faiss_index(index, id_to_sentence, index_path, mapping_path)
+                print(f"Banco vetorial atualizado com sucesso para {pdf_file}.")
 
-            # Mover arquivo para a pasta de treinados
-            os.makedirs(trained_dir, exist_ok=True)
-            os.rename(pdf_path, os.path.join(trained_dir, pdf_file))
+                # Mover arquivo para a pasta de treinados
+                os.makedirs(trained_dir, exist_ok=True)
+                os.rename(pdf_path, os.path.join(trained_dir, pdf_file))
+            except Exception as e:
+                print(f"Erro ao processar {pdf_file}")
+                raise e
 
     # Salvar banco vetorial atualizado
     save_faiss_index(index, id_to_sentence, index_path, mapping_path)
