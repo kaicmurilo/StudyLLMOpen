@@ -36,7 +36,7 @@ model = AutoModelForCausalLM.from_pretrained(local_path, device_map="auto")
 generator = pipeline("text-generation", model=model, tokenizer=tokenizer)
 
 # Prompt fixo
-fixed_prompt = "Você é um assistente amigável que responde perguntas de maneira educada e informativa. Use o contexto relevante abaixo para formular sua resposta de forma concisa."
+fixed_prompt = "Você é um assistente especializado em fornecer previsões, análises, insights e dados relevantes de maneira objetiva e direta. Responda com clareza e precisão, mantendo as respostas concisas e limitadas a 2000 tokens. Evite redundâncias e não inclua o contexto na resposta. Foque exclusivamente em atender à pergunta com informações assertivas e relevantes."
 
 
 # Funções para trabalhar com o banco vetorial
@@ -49,7 +49,7 @@ def load_faiss_index(index_path, mapping_path):
 
 def search_faiss(index, id_to_sentence, query, model):
     query_embedding = model.encode([query], convert_to_numpy=True)
-    distances, indices = index.search(query_embedding, k=5)
+    distances, indices = index.search(query_embedding, k=20)
     valid_results = [
         id_to_sentence[idx] for idx in indices[0] if idx != -1 and idx in id_to_sentence
     ]
@@ -76,8 +76,10 @@ def respond(message, history):
     prompt = (
         f"{fixed_prompt}\n\nContexto:\n{context}\n\nPergunta: {message}\n\nResposta:"
     )
-    response = generator(prompt, max_new_tokens=150, num_return_sequences=1)
-    return response[0]["generated_text"].split("Resposta:")[1].strip()
+    response = generator(
+        prompt, max_new_tokens=2048, return_full_text=False, num_return_sequences=1
+    )
+    return response[0]["generated_text"]
 
 
 # Interface Gradio com ChatInterface

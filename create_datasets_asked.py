@@ -1,14 +1,27 @@
+import hashlib
 import json
 import os
 
 from PyPDF2 import PdfReader
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# Configuração do modelo local
-LOCAL_MODEL_DIR = (
-    "./open_llama_7b_v2"  # Caminho onde o modelo está armazenado localmente
-)
+# Configuração do modelo e do chunk
+MODEL_NAME = "meta-llama/Llama-3.2-1B-Instruct"  # Nome do modelo a ser usado
+LOCAL_MODEL_DIR = "./models/Llama-3.2-1B-Instruct"  # Caminho do modelo local
 CHUNK_SIZE = 500  # Limite de tokens por chunk
+CONFIG_DIR = "config"  # Diretório de configuração
+HASH_FILE = os.path.join(
+    CONFIG_DIR, "processed_files.json"
+)  # Hash dos arquivos processados
+
+
+# Função para calcular o hash de um arquivo
+def calculate_file_hash(file_path):
+    hasher = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        while chunk := f.read(8192):
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 # Função para carregar o modelo localmente
@@ -19,13 +32,27 @@ def load_local_model(local_path):
 
     tokenizer = AutoTokenizer.from_pretrained(local_path)
     model = AutoModelForCausalLM.from_pretrained(
-        local_path, device_map="cpu"
-    )  # Força uso de CPU
+        local_path, device_map="auto"  # Ajusta automaticamente o dispositivo (CPU/GPU)
+    )
     return model, tokenizer
 
 
-# Carregar o modelo e o tokenizer
-model, tokenizer = load_local_model(LOCAL_MODEL_DIR)
+# Função para carregar hashes dos arquivos processados
+def load_processed_hashes():
+    if not os.path.exists(HASH_FILE):
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(HASH_FILE, "w", encoding="utf-8") as f:
+            json.dump([], f)
+    with open(HASH_FILE, "r", encoding="utf-8") as f:
+        return set(json.load(f))
+
+
+# Função para salvar hashes dos arquivos processados
+def save_processed_hash(file_hash):
+    hashes = load_processed_hashes()
+    hashes.add(file_hash)
+    with open(HASH_FILE, "w", encoding="utf-8") as f:
+        json.dump(list(hashes), f, ensure_ascii=False, indent=4)
 
 
 # Função para extrair texto dos PDFs e dividir em chunks
@@ -39,7 +66,7 @@ def read_pdf_in_chunks(pdf_path, chunk_size=CHUNK_SIZE):
     # Dividir o texto em pedaços limitados por tokens
     tokens = tokenizer.encode(text)
     chunks = [tokens[i : i + chunk_size] for i in range(0, len(tokens), chunk_size)]
-    return [tokenizer.decode(chunk) for chunk in chunks]
+    return [tokenizer.decode(chunk, skip_special_tokens=True) for chunk in chunks]
 
 
 # Função para gerar perguntas e respostas para o texto completo
@@ -56,14 +83,14 @@ def generate_questions_answers_from_text(chunks):
 
             ### Pergunta:
             """
-        inputs = tokenizer(prompt_question, return_tensors="pt")
-        outputs = model.generate(**inputs, max_new_tokens=50)
+        inputs = tokenizer(prompt_question, return_tensors="pt", truncation=True)
+        outputs = model.generate(inputs["input_ids"], max_new_tokens=50)
         question = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
         # Gerar resposta com base na pergunta
         prompt_answer = prompt_question + question + "\n\n### Resposta:"
-        inputs = tokenizer(prompt_answer, return_tensors="pt")
-        outputs = model.generate(**inputs, max_new_tokens=50)
+        inputs = tokenizer(prompt_answer, return_tensors="pt", truncation=True)
+        outputs = model.generate(inputs["input_ids"], max_new_tokens=50)
         answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
         # Adicionar o contexto, pergunta e resposta
@@ -81,10 +108,18 @@ def generate_questions_answers_from_text(chunks):
 # Criar dataset com perguntas e respostas para cada PDF
 def create_dataset_from_pdfs(folder_path, output_path, chunk_size=CHUNK_SIZE):
     dataset = []
+    processed_hashes = load_processed_hashes()
 
     for file_name in os.listdir(folder_path):
         if file_name.endswith(".pdf"):
             file_path = os.path.join(folder_path, file_name)
+            file_hash = calculate_file_hash(file_path)
+
+            # Ignorar arquivos já processados
+            if file_hash in processed_hashes:
+                print(f"Ignorando {file_name}, já processado.")
+                continue
+
             print(f"Processando: {file_name}")
 
             # Extrair texto do PDF em chunks
@@ -104,6 +139,9 @@ def create_dataset_from_pdfs(folder_path, output_path, chunk_size=CHUNK_SIZE):
                     }
                 )
 
+            # Salvar hash do arquivo processado
+            save_processed_hash(file_hash)
+
     # Salvar dataset como JSON
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(dataset, f, ensure_ascii=False, indent=4)
@@ -113,5 +151,8 @@ def create_dataset_from_pdfs(folder_path, output_path, chunk_size=CHUNK_SIZE):
 
 # Configuração da pasta e execução
 folder_path = "pdfs"  # Caminho para os PDFs
-output_path = "pdf_full_question_answer_dataset.json"  # Caminho de saída do dataset
+output_path = (
+    "map_local/pdf_full_question_answer_dataset.json"  # Caminho de saída do dataset
+)
+model, tokenizer = load_local_model(LOCAL_MODEL_DIR)
 create_dataset_from_pdfs(folder_path, output_path)
