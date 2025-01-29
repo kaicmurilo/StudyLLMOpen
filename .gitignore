@@ -9,3 +9,6 @@ map_local/
 config/
 imagens/
 csv/
+dist/
+build/
+*.spec

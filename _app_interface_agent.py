@@ -11,8 +11,8 @@ index_path = "map_local/faiss_index.bin"
 mapping_path = "map_local/id_to_sentence.pkl"
 
 # Nome do modelo e diretório local
-model_name = "meta-llama/Llama-3.2-1B-Instruct"
-local_path = "./models/Llama-3.2-1B-Instruct"
+model_name = "openlm-research/open_llama_3b"  # Modelo alternativo
+local_path = "./models/open_llama_3b"
 
 # Verifica se o modelo já foi baixado
 if not os.path.exists(local_path):
@@ -22,7 +22,7 @@ if not os.path.exists(local_path):
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        device_map="auto",
+        # device_map="auto",
     )
     model.save_pretrained(local_path)
 else:
@@ -30,7 +30,8 @@ else:
 
 # Carrega o modelo local
 tokenizer = AutoTokenizer.from_pretrained(local_path)
-model = AutoModelForCausalLM.from_pretrained(local_path, device_map="auto")
+model = AutoModelForCausalLM.from_pretrained(local_path)
+# model = AutoModelForCausalLM.from_pretrained(local_path, device_map="auto")
 
 # Configura o pipeline para geração de texto
 generator = pipeline("text-generation", model=model, tokenizer=tokenizer)

@@ -3,8 +3,10 @@ import os
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # Nome do modelo e diretório local
-model_name = "meta-llama/Llama-3.2-1B-Instruct"  # Alterar para outro se necessário
-local_path = "./models/Llama-3.2-1B-Instruct"
+model_name = (
+    "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"  # Alterar para outro se necessário
+)
+local_path = "./models/DeepSeek-R1-Distill-Qwen-1.5B"
 
 # Verifica se o modelo já foi baixado
 if not os.path.exists(local_path):
